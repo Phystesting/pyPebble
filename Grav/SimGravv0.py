@@ -25,7 +25,7 @@ class Body:
 # === Gravity acceleration calculation ===
 def compute_accels(time, positions, velocities, masses, args):
     h = args
-    eps2 = 1e-4
+    eps2 = 1e-2
     r_cut = h
     n = len(positions)
     accels = np.zeros_like(positions)
@@ -166,7 +166,7 @@ def run_simulation(bodies, t_start, t_finish, n, args, memfrac=0.5):
     return pos, vel, filtered_t_vals
 
 # === Simulation constants ===
-h = 0.1             # Smoothing length (also used as r_cut)
+h = 10            # Smoothing length (also used as r_cut)
 box_limit = 20    # Bounding box limit
 args = (h)     # Parameters for force computation
 
@@ -176,10 +176,18 @@ t_finish = 50
 n = 10000
 
 bodies = []
-for _ in range(1000):
+for _ in range(100):
     start_pos = np.array([np.random.uniform(-2.5, 2.5), np.random.uniform(-2.5, 2.5)])
+    if start_pos[0] > 0 and start_pos[1] > 0:
+        start_vel = [1, 0]
+    elif start_pos[0] > 0 and start_pos[1] < 0:
+        start_vel = [0, -1]
+    elif start_pos[0] < 0 and start_pos[1] < 0:
+        start_vel = [-1, 0]
+    else:
+        start_vel = [0, 1]
     start_vel = np.random.uniform(-5, 5, 2)
-    mass = 10
+    mass = 100
     bodies.append(Body(position=start_pos, velocity=start_vel, mass=mass))
 
 start = time.perf_counter()
