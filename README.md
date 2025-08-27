@@ -1,0 +1,84 @@
+# PyPebble: An N-Body Simulation Toolkit
+
+PyPebble is a Python model to handle N-body problems, specifically geared towards gravitational simulations (with more features planned for the future). This code is still under development.
+Currently, inputs and outputs are configured in the following units:
+- Distance: parsecs (pc)
+- Mass: solar masses (M☉)
+- Time: megayears (Myr)
+
+Future versions aim to support more flexible unit selection.
+
+------------------------------------------------------------
+
+## Installation
+
+Using pip:
+```bash
+pip install pyPebble
+```
+Clone this repository and install manually:
+```bash
+git clone https://github.com/your-username/pypebble.git
+cd pypebble
+pip install -r requirements.txt
+pip install -e .
+```
+------------------------------------------------------------
+
+## Usage
+
+### Creating a System
+You can define the properties of particles directly by passing arrays of positions, velocities, and masses:
+
+from pypebble import Bodies
+```python
+system = Bodies(positions, velocities, masses)
+```
+Alternatively, you can create a disc of particles using the built-in generator:
+```python
+system = Bodies().create_disc(
+    n_particles=100,
+    r_max=10,
+    center=[0, 0, 0],
+    ang_vel=0.05,
+    v_sigma=None,
+    total_mass=None,
+    particle_mass=None,
+    distribution="uniform"
+)
+```
+### Setting up the Simulation
+With a system defined, initialize the simulation using setup:
+```python
+simulation = system.setup(
+    softening=1e-2,
+    bounds=20,
+    smooth_len=10,
+    t_start=0,
+    t_finish=50,
+    nsteps=1000,
+    Enable_GPU=True,
+    save_output=None
+)
+```
+### Running the Simulation
+Run with:
+```python
+simulation.run()
+```
+The simulation currently saves output data (time, position, velocity, and mass) to an .h5 file.
+Future improvements will include better ways to run and visualize simulations.
+
+------------------------------------------------------------
+
+## Roadmap
+- Support for multiple unit systems
+- Additional initial condition generators (e.g., clusters, binary systems)
+- General Optimisations
+- Visualization improvements
+
+------------------------------------------------------------
+
+## License
+MIT License.
+

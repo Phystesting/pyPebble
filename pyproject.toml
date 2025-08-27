@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pyPebble"
+version = "0.0.0"
+description = "Multi purpose N-body sim"
+readme = "README.md" 
+authors = [{ name = "Connor Crawford" }]
+dependencies = []
+requires-python = ">=3.7"
+

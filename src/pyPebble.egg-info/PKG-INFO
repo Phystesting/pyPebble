@@ -1,0 +1,7 @@
+Metadata-Version: 2.4
+Name: pyPebble
+Version: 0.0.0
+Summary: Multi purpose N-body sim
+Author: Connor Crawford
+Requires-Python: >=3.7
+Description-Content-Type: text/markdown
