@@ -1,1 +1,1 @@
-from .GravCore import Bodies
+from .GravCore import Pebbles

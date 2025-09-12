@@ -1,14 +1,12 @@
 # PyPebble: An N-Body Simulation Toolkit
 
 PyPebble is a Python model to handle N-body problems, specifically geared towards gravitational simulations (with more features planned for the future). This code is still under development.
-Currently, inputs and outputs are configured in the following units:
-- Distance: parsecs (pc)
-- Mass: solar masses (M☉)
-- Time: megayears (Myr)
+Currently, inputs and outputs are configured to use the following units:
+- Distance: parsecs
+- Mass: solar masses
+- Time: megayears
 
-Future versions aim to support more flexible unit selection.
-
-------------------------------------------------------------
+----------------------------------------
 
 ## Installation
 
@@ -16,30 +14,27 @@ Using pip:
 ```bash
 pip install pyPebble
 ```
-Clone this repository and install manually:
+Clone this repository and then install manually with:
 ```bash
-git clone https://github.com/your-username/pypebble.git
-cd pypebble
-pip install -r requirements.txt
 pip install -e .
 ```
-------------------------------------------------------------
+------------------------------------------------------
 
 ## Usage
 
 ### Creating a System
 You can define the properties of particles directly by passing arrays of positions, velocities, and masses:
 
-from pypebble import Bodies
+from pypebble import Pebbles
 ```python
-system = Bodies(positions, velocities, masses)
+system = Pebbles(positions, velocities, masses)
 ```
 Alternatively, you can create a disc of particles using the built-in generator:
 ```python
-system = Bodies().create_disc(
+system = Pebbles().create_disc(
     n_particles=100,
     r_max=10,
-    center=[0, 0, 0],
+    center=[0, 0],
     ang_vel=0.05,
     v_sigma=None,
     total_mass=None,
@@ -61,6 +56,11 @@ simulation = system.setup(
     save_output=None
 )
 ```
+### Live Animation
+```python
+simulation.start_animation()
+```
+
 ### Running the Simulation
 Run with:
 ```python
@@ -69,15 +69,20 @@ simulation.run()
 The simulation currently saves output data (time, position, velocity, and mass) to an .h5 file.
 Future improvements will include better ways to run and visualize simulations.
 
-------------------------------------------------------------
+--------------------------------------------------------------
 
-## Roadmap
+## To do
 - Support for multiple unit systems
-- Additional initial condition generators (e.g., clusters, binary systems)
+- Additional initial condition generators
 - General Optimisations
-- Visualization improvements
+- GUI 
+- Energy conservation checks
+- Multiprocessing option for simulation
+- Multithreading for writing to file
+- Allow simulations beyond a 2D plane
+- Realistic velocity and density distributions
 
-------------------------------------------------------------
+-------------------------------------------------------------
 
 ## License
 MIT License.

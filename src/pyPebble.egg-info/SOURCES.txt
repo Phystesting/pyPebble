@@ -1,3 +1,5 @@
+LICENCE.txt
+README.md
 pyproject.toml
 src/pyPebble/GravCore.py
 src/pyPebble/__init__.py

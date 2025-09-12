@@ -1,47 +1,17 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
+from matplotlib.animation import FuncAnimation
 from scipy.spatial import cKDTree
-from numba import cuda
 import tqdm
 import h5py
 import math
+import multiprocessing as mp
+from .gpu_module import gpu_accels
+import contextlib
 
 # Constants
 G = 0.0045  # Parsec^3 / (Msol * Megayears^2)
-
-@cuda.jit(device=True)
-def pair_accel(pos_i, pos_j, mass_i, mass_j, softening):
-    G = 0.0045
-    dx = pos_j[0] - pos_i[0]
-    dy = pos_j[1] - pos_i[1]
-    r = math.sqrt(dx*dx + dy*dy)
-    r2 = r*r + softening
-    F = G * mass_i * mass_j / r2
-
-    dirx = dx / r
-    diry = dy / r	
-        
-    # Apply force
-    ax_i = (F * dirx) / mass_i
-    ax_j = -(F * dirx) / mass_j
-    ay_i = (F * diry) / mass_i
-    ay_j = -(F * diry) / mass_j
-
-    return ax_i, ay_i, ax_j, ay_j
-
-@cuda.jit
-def compute_all_pairs(pair_indices, positions, masses, accels, softening):
-    idx = cuda.grid(1)
-    if idx < pair_indices.shape[0]:
-        i = pair_indices[idx, 0]
-        j = pair_indices[idx, 1]
-        ax_i, ay_i, ax_j, ay_j = pair_accel(positions[i], positions[j], masses[i], masses[j], softening)
-        cuda.atomic.add(accels, (i, 0), ax_i)
-        cuda.atomic.add(accels, (i, 1), ay_i)
-        cuda.atomic.add(accels, (j, 0), ax_j)
-        cuda.atomic.add(accels, (j, 1), ay_j)
-
 
 class Body:
     def __init__(self, position, velocity, mass):
@@ -49,7 +19,7 @@ class Body:
         self.velocity = np.array(velocity, dtype=float)
         self.mass = mass
 
-class Bodies:
+class Pebbles:
     def __init__(self, **kwargs):
         if "positions" in kwargs and "velocities" in kwargs and "masses" in kwargs:
             self.bodies = self.from_arrays(kwargs["positions"], kwargs["velocities"], kwargs["masses"])
@@ -92,48 +62,38 @@ class Bodies:
             raise ValueError("No bodies defined! Please assign bodies before setting up the simulation.")
 
 class Simulate:
-    def __init__(self, bodies, softening=1e-2, bounds=20, smooth_len=10, 
-                 t_start=0, t_finish=50, nsteps=1000, Enable_GPU=True, save_output=None):
+    def __init__(self, bodies, softening=1, bounds=20, smooth_len=30, t_start=0, t_finish=50, n_steps=1000, Enable_GPU=True, save_output=None):
         self.bodies = bodies.bodies
         self.softening = softening
         self.bounds = bounds
         self.smooth_len = smooth_len
         self.t_start = t_start
         self.t_finish = t_finish
-        self.n_steps = nsteps
+        self.n_steps = n_steps
+        self.n_bodies = len(bodies.bodies)
+        self.dt = None
+        
         self.Enable_GPU = Enable_GPU
         self.save_output = save_output
-        self.dt = None
+        
+        self.manager = mp.Manager()
+        self.shared_state = self.manager.dict()
+        self.shared_state["positions"] = np.array([body.position for body in bodies.bodies])
+        self.shared_state["velocities"] =  np.array([body.velocity for body in bodies.bodies])
+        self.shared_state["time"] = 0
+        self.lock = self.manager.Lock()
+        self.anim_process = None
     
     def compute_accels(self, time, positions, velocities):
         masses = np.array([body.mass for body in self.bodies])
         accels = np.zeros_like(velocities)
         tree = cKDTree(positions)
         pairs = np.array(list(tree.query_pairs(r=self.smooth_len)), dtype=np.int32)
+        softening = self.softening
         if pairs.size == 0:
             return accels
-        softening = self.softening
         if self.Enable_GPU:
-            # Create a float32 host array to receive GPU results
-            accels_gpu = np.zeros_like(velocities, dtype=np.float32)
-
-            stream = cuda.stream()
-            d_positions = cuda.to_device(positions.astype(np.float32), stream=stream)
-            d_masses = cuda.to_device(masses.astype(np.float32), stream=stream)
-            d_accels = cuda.to_device(accels_gpu, stream=stream)
-            d_pairs = cuda.to_device(pairs, stream=stream)
-
-            threadsperblock = 128
-            blockspergrid = (len(pairs) + threadsperblock - 1) // threadsperblock
-
-            compute_all_pairs[blockspergrid, threadsperblock, stream](d_pairs, d_positions, d_masses, d_accels, softening)
-
-            # Copy into float32 array
-            d_accels.copy_to_host(accels_gpu, stream=stream)
-            stream.synchronize()
-
-            # Convert to float64 for the rest of the code
-            accels = accels_gpu.astype(np.float64)
+            accels = gpu_accels(pairs,positions,velocities,masses,softening)
         else:
             for i, j in pairs:
                 r_vec = positions[j] - positions[i]
@@ -146,7 +106,7 @@ class Simulate:
 
         return accels
 
-    def rk4(self, time):
+    def rk4_step(self, time):
         positions = np.array([body.position for body in self.bodies])
         velocities = np.array([body.velocity for body in self.bodies])
         dt = self.dt
@@ -175,27 +135,82 @@ class Simulate:
             body.position = np.mod(body.position + self.bounds, 2 * self.bounds) - self.bounds
 
     def run(self):
-        n_bodies = len(self.bodies)
+        self.dt = (self.t_finish - self.t_start) / (self.n_steps - 1)
         t_vals = np.linspace(self.t_start, self.t_finish, self.n_steps)
-        self.dt = t_vals[1] - t_vals[0]
-        if self.save_output:
-            with h5py.File(self.save_output, "w") as f:
-                dset_time = f.create_dataset("time",shape=(self.n_steps), dtype='f8')
-                dset_pos = f.create_dataset("positions",shape=(self.n_steps,n_bodies,2), dtype='f8')
-                dset_vel = f.create_dataset("velocities",shape=(self.n_steps,n_bodies,2), dtype='f8')
-                dset_mass = f.create_dataset("masses",shape=(self.n_steps,n_bodies), dtype='f8')
-                for step, t in enumerate(tqdm.tqdm(t_vals, desc="Running simulation")):
-                    self.periodic_boundaries()
-                    self.rk4(t)
+        with self._setup_file() as (dset_time,dset_pos,dset_vel,dset_mass):
+            for step, t in enumerate(tqdm.tqdm(t_vals, desc="Running simulation")):
+                self.periodic_boundaries()
+                self.rk4_step(t)
                     
-                    positions = np.array([body.position for body in self.bodies])
-                    velocities = np.array([body.velocity for body in self.bodies])
-                    masses = np.array([body.mass for body in self.bodies])
-                    
+                positions = np.array([body.position for body in self.bodies])
+                velocities = np.array([body.velocity for body in self.bodies])
+                masses = np.array([body.mass for body in self.bodies])
+                
+                with self.lock:
+                    self.shared_state["positions"] = positions
+                    self.shared_state["velocities"] = velocities
+                    self.shared_state["time"] = t
+                 
+                if dset_time is not None:
                     dset_time[step] = t
                     dset_pos[step] = positions
                     dset_vel[step] = velocities
                     dset_mass[step] = masses
-                    
+                
+                
+                
+        if self.anim_process is not None and self.anim_process.is_alive():
+            self.stop_animation()
+        return self
+    
+    @contextlib.contextmanager
+    def _setup_file(self):
+        if self.save_output:
+            f = h5py.File(self.save_output, "w")
+            dset_time = f.create_dataset("time",shape=(self.n_steps), dtype='f8')
+            dset_pos = f.create_dataset("positions",shape=(self.n_steps,self.n_bodies,2), dtype='f8')
+            dset_vel = f.create_dataset("velocities",shape=(self.n_steps,self.n_bodies,2), dtype='f8')
+            dset_mass = f.create_dataset("masses",shape=(self.n_steps,self.n_bodies), dtype='f8')
+            yield dset_time, dset_pos, dset_vel, dset_mass
+            f.close()
+        else:
+            yield None, None, None, None
+        
+    def start_animation(self):
+        if self.anim_process is None or not self.anim_process.is_alive():
+            self.anim_process = mp.Process(target=self._run_ani)
+            self.anim_process.start()
+        return self
+        
+    def stop_animation(self):
+        if self.anim_process is not None:
+            if self.anim_process.is_alive():
+                self.anim_process.terminate()
+                self.anim_process.join()
+            self.anim_process = None
+        return self
+    def _run_ani(self):
+        fig, ax = plt.subplots()
+        scat = ax.scatter([], [], s=5)
+        ax.set_xlim(-self.bounds, self.bounds)
+        ax.set_ylim(-self.bounds, self.bounds)
+
+        def update(frame):
+            with self.lock:
+                pos = self.shared_state["positions"].copy()
+                t = self.shared_state["time"]
+            scat.set_offsets(pos)
+            ax.set_title(f"t = {t:.2f}")
+            return scat,
+
+        ani = FuncAnimation(fig, update, interval=50, blit=False)
+        plt.show()
+            
+
+
+
+
+
+
 
 
