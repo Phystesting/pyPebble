@@ -7,8 +7,7 @@ except ImportError:
     GPU_AVAILABLE = False
 if GPU_AVAILABLE:
     @cuda.jit(device=True)
-    def pair_accel(pos_i, pos_j, mass_i, mass_j, softening):
-        G = 0.0045
+    def pair_accel(G ,pos_i, pos_j, mass_i, mass_j, softening):
         dx = pos_j[0] - pos_i[0]
         dy = pos_j[1] - pos_i[1]
         r = math.sqrt(dx*dx + dy*dy)
@@ -28,22 +27,23 @@ if GPU_AVAILABLE:
         return ax_i, ay_i, ax_j, ay_j
 
     @cuda.jit
-    def compute_all_pairs(pair_indices, positions, masses, accels, softening):
+    def compute_all_pairs(G, pair_indices, positions, masses, accels, softening):
         idx = cuda.grid(1)
         if idx < pair_indices.shape[0]:
             i = pair_indices[idx, 0]
             j = pair_indices[idx, 1]
-            ax_i, ay_i, ax_j, ay_j = pair_accel(positions[i], positions[j], masses[i], masses[j], softening)
+            ax_i, ay_i, ax_j, ay_j = pair_accel(G, positions[i], positions[j], masses[i], masses[j], softening)
             cuda.atomic.add(accels, (i, 0), ax_i)
             cuda.atomic.add(accels, (i, 1), ay_i)
             cuda.atomic.add(accels, (j, 0), ax_j)
             cuda.atomic.add(accels, (j, 1), ay_j)
 
 
-    def gpu_accels(pairs,positions,velocities,masses,softening):
+    def gpu_accels(constants,pairs,positions,velocities,masses,softening):
         accels_gpu = np.zeros_like(velocities, dtype=np.float32)
-
         stream = cuda.stream()
+        d_softening = np.float32(softening)
+        d_G = np.float32(constants.G)
         d_positions = cuda.to_device(positions.astype(np.float32), stream=stream)
         d_masses = cuda.to_device(masses.astype(np.float32), stream=stream)
         d_accels = cuda.to_device(accels_gpu, stream=stream)
@@ -52,7 +52,7 @@ if GPU_AVAILABLE:
         threadsperblock = 128
         blockspergrid = (len(pairs) + threadsperblock - 1) // threadsperblock
 
-        compute_all_pairs[blockspergrid, threadsperblock, stream](d_pairs, d_positions, d_masses, d_accels, softening)
+        compute_all_pairs[blockspergrid, threadsperblock, stream](np.float32(constants.G), d_pairs, d_positions, d_masses, d_accels, d_softening)
 
         d_accels.copy_to_host(accels_gpu, stream=stream)
         stream.synchronize()

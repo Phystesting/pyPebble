@@ -9,10 +9,18 @@ import math
 import multiprocessing as mp
 from .gpu_module import gpu_accels
 import contextlib
-
-# Constants
-G = 0.0045  # Parsec^3 / (Msol * Megayears^2)
-
+class Constants:
+    def __init__(self, unit_system):
+        if unit_system == "psm":
+            self.psm()
+        elif unit_system == "asy":
+            self.asy()
+        else:
+            raise ValueError("Unknown unit system")
+    def psm(self):
+        self.G = 0.0045  # Parsec^3 / (Msol * Megayears^2)
+    def asy(self):
+        self.G = 39.4784176  # AU^3 / (Msol * Years^2)
 class Body:
     def __init__(self, position, velocity, mass):
         self.position = np.array(position, dtype=float)
@@ -93,7 +101,9 @@ class Pebbles:
             raise ValueError("No bodies defined! Please assign bodies before setting up the simulation.")
 
 class Simulate:
-    def __init__(self, pebbles, softening=1, bounds=20, cutoff_len=30, t_start=0, t_finish=50, n_steps=1000, Enable_GPU=True, save_output=None, track_energy=False, energy_samples=20):
+    def __init__(self, pebbles, units="asy", softening=1, bounds=20, cutoff_len=30, t_start=0, t_finish=50, n_steps=1000, Enable_GPU=True, save_output=None, track_energy=False, energy_samples=20):
+        self.constants = Constants(units)
+        self.G = self.constants.G
         self.pebbles = pebbles
         self.softening = softening
         self.bounds = bounds
@@ -119,7 +129,6 @@ class Simulate:
         self.shared_state["E"] = 0
         self.lock = self.manager.Lock()
         self.anim_process = None
-    
     def compute_potential(self):
         positions = self.pebbles.positions
         masses = self.pebbles.masses
@@ -127,7 +136,7 @@ class Simulate:
         for i in range(self.n_bodies):
             for j in range(i + 1, self.n_bodies):
                 r = np.linalg.norm(positions[j] - positions[i])
-                U -= G * masses[i] * masses[j] / np.sqrt(r**2 + self.softening)
+                U -= self.G * masses[i] * masses[j] / np.sqrt(r**2 + self.softening)
         return U
         
     def compute_kinetic(self):
@@ -141,12 +150,12 @@ class Simulate:
         accels = np.zeros_like(velocities)
         tree = cKDTree(positions)
         cutoff_len = np.sqrt(max(masses))
-        pairs = np.array(list(tree.query_pairs(r=cutoff_len)), dtype=np.int32)
+        pairs = np.array(list(tree.query_pairs(r=self.cutoff_len)), dtype=np.int32)
         softening = self.softening
         if pairs.size == 0:
             return accels
         if self.Enable_GPU:
-            accels = gpu_accels(pairs,positions,velocities,masses,softening)
+            accels = gpu_accels(self.constants, pairs,positions,velocities,masses,softening)
         else:
             for i, j in pairs:
                 r_vec = positions[j] - positions[i]
@@ -154,8 +163,8 @@ class Simulate:
                 direction = r_vec / r
                 denom = r ** 2 + self.softening
 
-                accels[i] += G * masses[j] * direction / denom
-                accels[j] += -G * masses[i] * direction / denom
+                accels[i] += self.G * masses[j] * direction / denom
+                accels[j] += -self.G * masses[i] * direction / denom
 
         return accels
 
