@@ -72,7 +72,7 @@ class Pebbles:
         for i in range(n):
             bodies.append(Body(positions[i],velocities[i],masses[i]))
         return bodies
-    def create_disc(self, n_particles, r_max, center, ang_vel, v_sigma=None, total_mass=None, particle_mass=None, distribution="uniform"):
+    def create_disc(self, n_particles, r_max, center, ang_vel, v_sigma=0, total_mass=None, particle_mass=None, distribution="uniform"):
         if total_mass:
             if particle_mass:
                 ValueError("You cannot define both a particle mass and a total Mass!")

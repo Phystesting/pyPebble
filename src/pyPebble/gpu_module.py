@@ -10,8 +10,8 @@ if GPU_AVAILABLE:
     def pair_accel(G ,pos_i, pos_j, mass_i, mass_j, softening):
         dx = pos_j[0] - pos_i[0]
         dy = pos_j[1] - pos_i[1]
-        r = math.sqrt(dx*dx + dy*dy)
-        r2 = r*r + softening
+        r = math.sqrt(dx*dx + dy*dy) + softening
+        r2 = r*r 
 
         dirx = dx / r
         diry = dy / r	
